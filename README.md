@@ -41,6 +41,31 @@ diffusion_policy/
 
 ## Quick Start
 
+## Environment Setup (Important)
+
+STEP uses the **same software environment** as the original Diffusion Policy repository.
+If you already have a working Diffusion Policy environment, you can use it directly.
+
+Recommended setup:
+
+```bash
+# Create environment (same dependency spec as Diffusion Policy)
+conda env create -f conda_environment.yaml
+
+# Activate
+conda activate diffusion_policy
+
+# Install this repo in editable mode
+pip install -e .
+```
+
+For platform-specific setups, you can also use:
+
+- `conda_environment_real.yaml` (real-robot stack)
+- `conda_environment_macos.yaml` (macOS)
+
+This design keeps STEP drop-in compatible with existing Diffusion Policy training/evaluation workflows.
+
 ### Method 1: Using Official/Existing Diffusion Weights (Recommended)
 
 STEP is entirely plug-and-play. If you already have official pre-trained Diffusion Policy weights, you can seamlessly load and accelerate them:
