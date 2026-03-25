@@ -87,6 +87,11 @@ class RobomimicLowdimRunner(BaseLowdimRunner):
 
         super().__init__(output_dir)
 
+        # 使用绝对路径，避免 AsyncVectorEnv 子进程工作目录不同导致相对路径失效
+        output_dir = os.path.abspath(os.path.expanduser(output_dir))
+        pathlib.Path(output_dir).mkdir(parents=True, exist_ok=True)
+        pathlib.Path(output_dir).joinpath('media').mkdir(parents=True, exist_ok=True)
+
         if n_envs is None:
             n_envs = n_train + n_test
 
@@ -163,7 +168,7 @@ class RobomimicLowdimRunner(BaseLowdimRunner):
                     if enable_render:
                         filename = pathlib.Path(output_dir).joinpath(
                             'media', wv.util.generate_id() + ".mp4")
-                        filename.parent.mkdir(parents=False, exist_ok=True)
+                        filename.parent.mkdir(parents=True, exist_ok=True)
                         filename = str(filename)
                         env.env.file_path = filename
 
@@ -190,7 +195,7 @@ class RobomimicLowdimRunner(BaseLowdimRunner):
                 if enable_render:
                     filename = pathlib.Path(output_dir).joinpath(
                         'media', wv.util.generate_id() + ".mp4")
-                    filename.parent.mkdir(parents=False, exist_ok=True)
+                    filename.parent.mkdir(parents=True, exist_ok=True)
                     filename = str(filename)
                     env.env.file_path = filename
 

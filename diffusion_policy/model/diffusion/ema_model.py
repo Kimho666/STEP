@@ -1,6 +1,8 @@
 import copy
 import torch
 from torch.nn.modules.batchnorm import _BatchNorm
+import dill
+import hydra
 
 class EMAModel:
     """
@@ -86,3 +88,14 @@ class EMAModel:
         # verify that iterating over module and then parameters is identical to parameters recursively.
         # assert old_all_dataptrs == all_dataptrs
         self.optimization_step += 1
+
+def load_diffusion_policy(diffusion_policy_ckpt_path, device):
+    dp_payload = torch.load(open(diffusion_policy_ckpt_path,'rb'), pickle_module=dill, map_location=device)
+    dp_cfg = dp_payload['cfg'].copy()
+    dp_cfg.policy._target_ = 'diffusion_policy.policy.enhanced_diffusion_unet_lowdim_policy.EnhancedDiffusionUnetLowdimPolicy'
+
+    diffusion_policy = hydra.utils.instantiate(dp_cfg.policy)
+    state_key = 'ema_model' if 'ema_model' in dp_payload['state_dicts'] else 'model'
+    diffusion_policy.load_state_dict(dp_payload['state_dicts'][state_key], strict=False)
+    diffusion_policy.eval()
+    return diffusion_policy

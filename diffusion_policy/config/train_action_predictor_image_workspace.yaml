@@ -1,0 +1,134 @@
+# Action Predictor Image 轻量配置
+# 适用于 robomimic 图像任务（pusht/lift/can/square/transport/tool_hang）
+# 通过修改 task=<task>_image 切换任务，默认 pusht_image
+
+defaults:
+  - _self_
+  - task: pusht_image
+
+name: train_action_predictor_image
+_target_: diffusion_policy.workspace.train_action_predictor_image_workspace.TrainActionPredictorImageWorkspace
+
+# 维度信息（obs_dim 由 encoder 输出决定，在 instantiate 后填充）
+obs_dim: null
+# 从任务的 shape_meta 中推断动作维度
+action_dim: ${task.shape_meta.action.shape[0]}
+keypoint_dim: 0
+horizon: 16
+n_obs_steps: 2
+n_action_steps: 8
+n_latency_steps: 0
+past_action_visible: False
+keypoint_visible_rate: 1.0
+
+# 一些任务配置引用的观测步数（例如 robomimic image *_abs），与 n_obs_steps 保持一致
+dataset_obs_steps: ${n_obs_steps}
+
+prev_action_horizon: 8
+
+# Policy 配置
+policy:
+  _target_: diffusion_policy.policy.action_predictor_image_policy.ActionPredictorImagePolicy
+
+  encoder:
+    _target_: diffusion_policy.model.vision.multi_image_obs_encoder.MultiImageObsEncoder
+    shape_meta: ${task.shape_meta}
+    rgb_model:
+      _target_: diffusion_policy.model.vision.small_conv_encoder.SmallConvEncoder
+      in_channels: 3
+      embed_dim: 128
+    resize_shape: null
+    crop_shape: null
+    random_crop: False
+    use_group_norm: False
+    share_rgb_model: True
+    imagenet_norm: False
+
+  model:
+    _target_: diffusion_policy.model.action_predictor.action_predictor_transformer.ActionPredictorTransformer
+    action_dim: ${action_dim}
+    obs_dim: 128
+    pred_horizon: ${horizon}
+    n_obs_steps: ${n_obs_steps}
+    prev_action_horizon: ${prev_action_horizon}
+    d_model: 128
+    n_head: 4
+    n_layers: 2
+    dropout: 0.1
+    dim_feedforward: 256
+
+  horizon: ${horizon}
+  n_action_steps: ${n_action_steps}
+  n_obs_steps: ${n_obs_steps}
+  prev_action_horizon: ${prev_action_horizon}
+
+# 数据加载器配置（图像任务，适中 batch 以控显存）
+dataloader:
+  batch_size: 64
+  num_workers: 4
+  shuffle: True
+  pin_memory: True
+  persistent_workers: True
+
+val_dataloader:
+  batch_size: 64
+  num_workers: 4
+  shuffle: False
+  pin_memory: True
+  persistent_workers: True
+
+# 优化器配置
+optimizer:
+  lr: 1.0e-4
+  betas: [0.9, 0.999]
+  eps: 1.0e-8
+  weight_decay: 1.0e-4
+
+# 训练配置
+training:
+  device: "cuda:0"
+  seed: 42
+  debug: False
+  resume: False
+  lr_scheduler: cosine
+  lr_warmup_steps: 500
+  num_epochs: 500
+  gradient_accumulate_every: 1
+  use_ema: False
+  rollout_every: 50
+  checkpoint_every: 50
+  val_every: 10
+  sample_every: 10
+  max_train_steps: null
+  max_val_steps: null
+  tqdm_interval_sec: 1.0
+
+logging:
+  project: action_predictor_image
+  resume: True
+  mode: offline
+  name: ${now:%Y.%m.%d-%H.%M.%S}_${name}_${task.name}
+  tags: ["${name}", "${task.name}", "light"]
+  id: null
+  group: null
+
+checkpoint:
+  topk:
+    monitor_key: val_loss
+    mode: min
+    k: 3
+    format_str: 'epoch={epoch:04d}-val_loss={val_loss:.3f}.ckpt'
+  save_last_ckpt: True
+  save_last_snapshot: False
+
+multi_run:
+  run_dir: data/outputs/${now:%Y.%m.%d}/${now:%H.%M.%S}_${name}_${task.name}
+
+hydra:
+  job:
+    chdir: False
+  run:
+    dir: data/outputs/${now:%Y.%m.%d}/${now:%H.%M.%S}_${name}_${task.name}
+  sweep:
+    dir: data/outputs/${now:%Y.%m.%d}/${now:%H.%M.%S}_${name}_${task.name}
+    subdir: ${hydra.job.num}

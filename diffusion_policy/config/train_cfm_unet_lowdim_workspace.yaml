@@ -1,0 +1,159 @@
+defaults:
+  - _self_
+  - task: pusht_lowdim
+
+name: train_cfm_unet_lowdim
+_target_: diffusion_policy.workspace.train_cfm_unet_lowdim_workspace.TrainCFMUnetLowdimWorkspace
+
+# ==================== CFM Baseline Configuration ====================
+# Optimal Transport Conditional Flow Matching (OT-CFM)
+# 
+# Key differences from Diffusion:
+# - No noise_scheduler needed
+# - Predicts velocity field (v = x_1 - x_0) instead of noise
+# - Uses continuous time t in [0, 1]
+# - Default 10 inference steps (vs 100 for diffusion)
+# ====================================================================
+
+obs_dim: ${task.obs_dim}
+action_dim: ${task.action_dim}
+keypoint_dim: ${task.keypoint_dim}
+task_name: ${task.name}
+exp_name: "cfm_baseline"
+
+horizon: 16
+n_obs_steps: 2
+n_action_steps: 8
+n_latency_steps: 0
+past_action_visible: False
+keypoint_visible_rate: 1.0
+obs_as_local_cond: False
+obs_as_global_cond: True
+pred_action_steps_only: False
+
+# prev_action conditioning (for temporal consistency)
+# 启用后，CFM 会使用上一个 action chunk 作为条件
+use_prev_action: False  # 设为 True 以启用 prev_action 条件
+
+policy:
+  _target_: diffusion_policy.policy.cfm_unet_lowdim_policy.CFMUnetLowdimPolicy
+
+  model:
+    _target_: diffusion_policy.model.diffusion.conditional_unet1d.ConditionalUnet1D
+    input_dim: "${eval: ${task.action_dim} if ${obs_as_local_cond} or ${obs_as_global_cond} else ${task.obs_dim} + ${task.action_dim}}"
+    local_cond_dim: "${eval: ${task.obs_dim} if ${obs_as_local_cond} else None}"
+    # global_cond_dim: obs_dim*n_obs_steps + (horizon*action_dim if use_prev_action)
+    global_cond_dim: "${eval: ${task.obs_dim}*${n_obs_steps} + (${horizon}*${task.action_dim} if ${use_prev_action} else 0) if ${obs_as_global_cond} else None}"
+    diffusion_step_embed_dim: 256
+    down_dims: [256, 512, 1024]
+    kernel_size: 5
+    n_groups: 8
+    cond_predict_scale: True
+  
+  # CFM-specific parameters (no noise_scheduler!)
+  horizon: ${horizon}
+  obs_dim: ${obs_dim}
+  action_dim: ${action_dim}
+  n_action_steps: ${eval:'${n_action_steps}+${n_latency_steps}'}
+  n_obs_steps: ${n_obs_steps}
+  
+  # CFM inference steps (much fewer than diffusion!)
+  # Recommended: 10 for best quality, 2-4 for fast inference
+  num_inference_steps: 10
+  
+  # Minimum noise at t=0 (data side) for stability
+  # 0.0 is standard OT-CFM, small values (0.001) can help stability
+  sigma_min: 0.0
+  
+  # Time sampling strategy (π0-style)
+  # 'beta': Beta(1.5, 1) distribution - biases toward noise, better training
+  # 'uniform': Uniform[0,1] - standard CFM baseline
+  time_sampling: beta
+  
+  obs_as_local_cond: ${obs_as_local_cond}
+  obs_as_global_cond: ${obs_as_global_cond}
+  pred_action_steps_only: ${pred_action_steps_only}
+  
+  # prev_action conditioning
+  use_prev_action: ${use_prev_action}
+  oa_step_convention: True
+
+ema:
+  _target_: diffusion_policy.model.diffusion.ema_model.EMAModel
+  update_after_step: 0
+  inv_gamma: 1.0
+  power: 0.75
+  min_value: 0.0
+  max_value: 0.9999
+
+dataloader:
+  batch_size: 256
+  num_workers: 1
+  shuffle: True
+  pin_memory: True
+  persistent_workers: False
+
+val_dataloader:
+  batch_size: 256
+  num_workers: 1
+  shuffle: False
+  pin_memory: True
+  persistent_workers: False
+
+optimizer:
+  _target_: torch.optim.AdamW
+  lr: 1.0e-4
+  betas: [0.95, 0.999]
+  eps: 1.0e-8
+  weight_decay: 1.0e-6
+
+training:
+  device: "cuda:0"
+  seed: 42
+  debug: False
+  resume: True
+  # optimization
+  lr_scheduler: cosine
+  lr_warmup_steps: 500
+  num_epochs: 5000
+  gradient_accumulate_every: 1
+  # EMA
+  use_ema: True
+  # logging
+  rollout_every: 50
+  checkpoint_every: 50
+  val_every: 1
+  sample_every: 5
+  # steps
+  max_train_steps: null
+  max_val_steps: null
+  # misc
+  tqdm_interval_sec: 1.0
+
+logging:
+  project: pusht_cfm_lowdim
+  resume: True
+  mode: online
+  name: ${now:%Y.%m.%d-%H.%M.%S}_${name}_${task_name}
+  tags: ["${name}", "${task_name}", "${exp_name}"]
+  id: null
+  group: null
+
+checkpoint:
+  topk:
+    monitor_key: test_mean_score
+    mode: max
+    k: 5
+    format_str: 'epoch={epoch:04d}-test_mean_score={test_mean_score:.3f}.ckpt'
+  save_last_ckpt: True
+  save_last_snapshot: False
+
+multi_run:
+  run_dir: data/outputs/${now:%Y.%m.%d}/${now:%H.%M.%S}_${name}_${task_name}
+  wandb_name_base: ${now:%Y.%m.%d-%H.%M.%S}_${name}_${task_name}
+
+hydra:
+  job:
+    chdir: False
+  run:
+    dir: data/outputs/${now:%Y.%m.%d}/${now:%H.%M.%S}_${name}_${task_name}

@@ -1,0 +1,140 @@
+# Action Predictor训练配置文件
+# 用于独立训练Action Predictor模型
+
+defaults:
+  - _self_
+  - task: pusht_lowdim
+
+name: train_action_predictor_lowdim
+_target_: diffusion_policy.workspace.train_action_predictor_lowdim_workspace.TrainActionPredictorLowdimWorkspace
+
+# 维度信息
+obs_dim: ${task.obs_dim}
+action_dim: ${task.action_dim}
+keypoint_dim: ${task.keypoint_dim}
+task_name: ${task.name}
+exp_name: "default"
+
+# 序列参数
+horizon: 16
+n_obs_steps: 2
+n_action_steps: 8
+n_latency_steps: 0
+past_action_visible: False
+keypoint_visible_rate: 1.0
+
+# Action Predictor特有参数
+prev_action_horizon: 8  # 上一个action chunk的长度
+use_vae: False
+
+# Policy配置
+policy:
+  _target_: diffusion_policy.policy.action_predictor_lowdim_policy.ActionPredictorLowdimPolicy
+  backend: transformer
+  horizon: ${horizon}
+  obs_dim: ${obs_dim}
+  action_dim: ${action_dim}
+  n_action_steps: ${n_action_steps}
+  n_obs_steps: ${n_obs_steps}
+  prev_action_horizon: ${prev_action_horizon}
+  model:
+    _target_: diffusion_policy.model.action_predictor.action_predictor_transformer.ActionPredictorTransformer
+    action_dim: ${action_dim}
+    obs_dim: ${obs_dim}
+    pred_horizon: ${horizon}
+    n_obs_steps: ${n_obs_steps}
+    prev_action_horizon: ${prev_action_horizon}
+    d_model: 256
+    n_head: 8
+    n_layers: 4
+    dropout: 0.1
+    dim_feedforward: 1024
+  
+vae_model:
+  _target_: diffusion_policy.model.action_predictor.vae_action_predictor.VAEModel
+  action_dim: ${action_dim}
+  action_horizon: ${horizon}
+  obs_dim: ${obs_dim}
+  obs_horizon: ${n_obs_steps}
+  latent_dim: 32
+  layer: 256
+  use_ema: True
+  pretrain: False
+  ckpt_path: null
+
+# 数据加载器配置
+dataloader:
+  batch_size: 256
+  num_workers: 4
+  shuffle: True
+  pin_memory: True
+  persistent_workers: True
+
+val_dataloader:
+  batch_size: 256
+  num_workers: 4
+  shuffle: False
+  pin_memory: True
+  persistent_workers: True
+
+# 优化器配置
+optimizer:
+  lr: 1.0e-4
+  betas: [0.9, 0.999]
+  eps: 1.0e-8
+  weight_decay: 1.0e-4
+
+# 训练配置
+training:
+  device: "cuda:0"
+  seed: 42
+  debug: False
+  resume: False  # 设为False确保从头训练，不恢复旧checkpoint
+  # 优化参数
+  lr_scheduler: cosine
+  lr_warmup_steps: 500
+  num_epochs: 3000
+  gradient_accumulate_every: 1
+  # 日志参数
+  use_ema: False
+  rollout_every: 50
+  checkpoint_every: 50
+  val_every: 10
+  sample_every: 10
+  max_train_steps: null
+  max_val_steps: null
+  tqdm_interval_sec: 1.0
+
+# 日志配置
+logging:
+  project: action_predictor_pusht
+  resume: True
+  mode: online
+  name: ${now:%Y.%m.%d-%H.%M.%S}_${name}_${task_name}
+  tags: ["${name}", "${task_name}", "${exp_name}"]
+  id: null
+  group: null
+
+# Checkpoint配置
+checkpoint:
+  topk:
+    monitor_key: val_loss
+    mode: min
+    k: 5
+    format_str: 'epoch={epoch:04d}-val_loss={val_loss:.3f}.ckpt'
+  save_last_ckpt: True
+  save_last_snapshot: False
+
+# 多运行配置
+multi_run:
+  run_dir: data/outputs/${now:%Y.%m.%d}/${now:%H.%M.%S}_${name}_${task_name}
+
+# Hydra配置
+hydra:
+  job:
+    chdir: False
+  run:
+    dir: data/outputs/${now:%Y.%m.%d}/${now:%H.%M.%S}_${name}_${task_name}
+  sweep:
+    dir: data/outputs/${now:%Y.%m.%d}/${now:%H.%M.%S}_${name}_${task_name}
+    subdir: ${hydra.job.num}
